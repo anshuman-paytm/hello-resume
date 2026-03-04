@@ -51,7 +51,7 @@ function ResumePreview({ resumeData, sectionOrder }) {
     };
 
     // Helper function to add a section title with underline
-    // CSS: line-height: 1.15, padding-bottom: 0.15em, margin-bottom: 0.3em
+    // CSS: line-height: 1.15, padding-bottom: 0.04em, margin-bottom: 0.3em
     // Structure: text → padding-bottom → border → margin-bottom
     const addSectionTitle = (title) => {
       checkPageBreak(10);
@@ -59,11 +59,10 @@ function ResumePreview({ resumeData, sectionOrder }) {
       pdf.setFont("helvetica", "bold");
       // Add text at current yPos (baseline)
       pdf.text(title, margin, yPos);
-      // Move down by line-height to get past the text, then add padding-bottom
-      // Use line-height (1.15) to move past the text baseline
-      yPos += getLineHeight(11); // Move past the text line
-      // Add padding-bottom (0.15em) - space between text and border
-      yPos += emToMm(0.15, 11); // 0.58mm
+      // In CSS, padding-bottom: 0.04em creates minimal space between text and border
+      // The text baseline is at yPos. For uppercase text, baseline is near bottom of content box.
+      // User wants a little gap - very small but visible spacing between header and line
+      yPos += 0.6; // Small visible gap (~0.6mm) between header text and horizontal line
       // Draw the border line at this yPos (1pt = 0.35mm width)
       pdf.setLineWidth(0.35);
       pdf.line(margin, yPos, pageWidth - margin, yPos);
