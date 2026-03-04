@@ -1,30 +1,356 @@
 import { useRef } from 'react'
 import { FiDownload } from 'react-icons/fi'
 import jsPDF from 'jspdf'
-import html2canvas from 'html2canvas'
 
 function ResumePreview({ resumeData, sectionOrder }) {
   const resumeRef = useRef(null)
 
-  const exportToPDF = async () => {
-    const element = resumeRef.current
-    const canvas = await html2canvas(element, {
-      scale: 2,
-      useCORS: true,
-      logging: false
-    })
-    
-    const imgData = canvas.toDataURL('image/png')
+  const exportToPDF = () => {
     const pdf = new jsPDF('p', 'mm', 'a4')
-    const pdfWidth = pdf.internal.pageSize.getWidth()
-    const pdfHeight = pdf.internal.pageSize.getHeight()
-    const imgWidth = canvas.width
-    const imgHeight = canvas.height
-    const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight)
-    const imgX = (pdfWidth - imgWidth * ratio) / 2
-    const imgY = 0
+    const pageWidth = pdf.internal.pageSize.getWidth()
+    const pageHeight = pdf.internal.pageSize.getHeight()
+    const margin = 12.7 // 0.5 inch margin
+    const maxWidth = pageWidth - (margin * 2)
+    let yPos = margin
+
+    // Helper function to add a new page if needed
+    const checkPageBreak = (requiredHeight) => {
+      if (yPos + requiredHeight > pageHeight - margin) {
+        pdf.addPage()
+        yPos = margin
+        return true
+      }
+      return false
+    }
+
+    // Helper function to add text with word wrapping - returns the final yPos
+    // CSS: line-height: 1.15, so for 11pt font, line-height = 12.65pt ≈ 4.46mm
+    const addText = (text, x, maxWidth, fontSize = 11, fontStyle = 'normal', align = 'left', lineSpacing = null) => {
+      pdf.setFontSize(fontSize)
+      pdf.setFont('helvetica', fontStyle)
+      
+      const lines = pdf.splitTextToSize(text, maxWidth)
+      // Use line-height: 1.15 for proper spacing (matches CSS)
+      const lineHeight = lineSpacing || (fontSize * 1.15 * 0.352778) // Convert pt to mm: 1pt = 0.352778mm
+      
+      lines.forEach((line) => {
+        checkPageBreak(lineHeight + 1)
+        pdf.text(line, x, yPos, { align })
+        yPos += lineHeight
+      })
+      
+      return yPos
+    }
+
+    // Helper function to add a section title with underline
+    // CSS: line-height: 1.15, padding-bottom: 0.15em, margin-bottom: 0.3em
+    const addSectionTitle = (title) => {
+      checkPageBreak(10)
+      pdf.setFontSize(11)
+      pdf.setFont('helvetica', 'bold')
+      // Add text at current yPos (baseline)
+      pdf.text(title, margin, yPos)
+      // In jsPDF, text is positioned at baseline. For 11pt font:
+      // - Ascender height (capital letters) is ~70% of font size = ~7.7pt = 2.7mm
+      // - We need to move past the text + add padding
+      // Move down by font size + padding to ensure line is well below text
+      yPos += 11 * 0.352778 // Full font size in mm (11pt = 3.88mm)
+      yPos += emToMm(0.15, 11) // padding-bottom
+      pdf.setLineWidth(0.35) // 1pt = 0.35mm
+      pdf.line(margin, yPos, pageWidth - margin, yPos)
+      // Add margin after line (0.3em)
+      yPos += emToMm(0.3, 11)
+    }
+
+    // Helper function to add spacing
+    const addSpacing = (spacing) => {
+      checkPageBreak(spacing)
+      yPos += spacing
+    }
+
+    // Helper to convert em to mm (assuming 11pt base font)
+    const emToMm = (em, baseFontSize = 11) => {
+      return em * baseFontSize * 0.352778 // 1pt = 0.352778mm
+    }
     
-    pdf.addImage(imgData, 'PNG', imgX, imgY, imgWidth * ratio, imgHeight * ratio)
+    // Helper to get line height in mm
+    const getLineHeight = (fontSize = 11) => {
+      return fontSize * 1.15 * 0.352778 // line-height: 1.15
+    }
+
+    // Header Section
+    const fullName = resumeData.personalInfo.fullName || 'Your Name'
+    checkPageBreak(10)
+    pdf.setFontSize(22)
+    pdf.setFont('helvetica', 'bold')
+    pdf.text(fullName, pageWidth / 2, yPos, { align: 'center' })
+    // CSS: resume-name line-height: 1.2, margin-bottom: 0.2em at 22pt
+    yPos += 22 * 1.2 * 0.352778 + emToMm(0.2, 22)
+
+    // Contact Information
+    const contactInfo = [
+      resumeData.personalInfo.phone,
+      resumeData.personalInfo.email,
+      resumeData.personalInfo.location,
+      resumeData.personalInfo.linkedin,
+      resumeData.personalInfo.github,
+      resumeData.personalInfo.website
+    ].filter(Boolean).join(' | ')
+
+    if (contactInfo) {
+      checkPageBreak(5)
+      pdf.setFontSize(10)
+      pdf.setFont('helvetica', 'normal')
+      pdf.text(contactInfo, pageWidth / 2, yPos, { align: 'center' })
+      // CSS: contact-info has line-height: 1.4 (not 1.15)
+      yPos += 10 * 1.4 * 0.352778 // 10pt font * 1.4 line-height
+    }
+
+    // CSS: resume-header margin-bottom: 0.6em at 11pt = 0.6 * 11pt = 6.6pt ≈ 2.33mm
+    addSpacing(emToMm(0.6))
+
+    // Summary Section (if exists)
+    if (resumeData.summary && resumeData.summary.trim()) {
+      checkPageBreak(8)
+      pdf.setFontSize(11)
+      pdf.setFont('helvetica', 'normal')
+      const summaryLines = pdf.splitTextToSize(resumeData.summary.trim(), maxWidth)
+      summaryLines.forEach(line => {
+        checkPageBreak(getLineHeight())
+        pdf.text(line, margin, yPos, { align: 'left' })
+        yPos += getLineHeight()
+      })
+      // Summary is part of resume-section, so 0.7em spacing after
+      addSpacing(emToMm(0.7))
+    }
+
+    // Render sections in order
+    let isFirstSection = true
+    sectionOrder.forEach((sectionKey) => {
+      // Education Section
+      if (sectionKey === 'education' && resumeData.education.length > 0) {
+        // CSS: resume-section margin-bottom: 0.7em between sections
+        // First section doesn't need spacing if no summary (header already has spacing)
+        if (!isFirstSection || (resumeData.summary && resumeData.summary.trim())) {
+          addSpacing(emToMm(0.7))
+        }
+        isFirstSection = false
+        addSectionTitle('EDUCATION')
+        
+        resumeData.education.forEach((edu, idx) => {
+          checkPageBreak(15)
+          
+          // School and Location - CSS: margin-bottom: 0.1em
+          pdf.setFont('helvetica', 'bold')
+          pdf.setFontSize(11)
+          const schoolText = edu.school || ''
+          const locationText = edu.location || ''
+          pdf.text(schoolText, margin, yPos)
+          if (locationText) {
+            pdf.setFont('helvetica', 'normal')
+            pdf.text(locationText, pageWidth - margin, yPos, { align: 'right' })
+          }
+          yPos += getLineHeight() + emToMm(0.1)
+
+          // Degree and Date - CSS: margin-bottom: 0.1em
+          pdf.setFont('helvetica', 'normal')
+          let degreeText = edu.degree || ''
+          if (edu.minor) {
+            degreeText += `, Minor in ${edu.minor}`
+          }
+          pdf.text(degreeText, margin, yPos)
+          
+          const dateText = `${edu.startDate || ''} - ${edu.endDate || 'Present'}`
+          pdf.text(dateText, pageWidth - margin, yPos, { align: 'right' })
+          yPos += getLineHeight() + emToMm(0.1)
+
+          // GPA
+          if (edu.gpa) {
+            pdf.text(`GPA: ${edu.gpa}`, margin, yPos)
+            yPos += getLineHeight()
+          }
+          
+          // CSS: education-item margin-bottom: 0.7em between items
+          if (idx < resumeData.education.length - 1) {
+            addSpacing(emToMm(0.7))
+          }
+        })
+      }
+
+      // Experience Section
+      if (sectionKey === 'experience' && resumeData.experience.length > 0) {
+        if (!isFirstSection || (resumeData.summary && resumeData.summary.trim())) {
+          addSpacing(emToMm(0.7)) // CSS: 0.7em between sections
+        }
+        isFirstSection = false
+        addSectionTitle('EXPERIENCE')
+        
+        resumeData.experience.forEach((exp, idx) => {
+          checkPageBreak(15)
+          
+          // Title and Date - CSS: margin-bottom: 0.1em
+          pdf.setFont('helvetica', 'bold')
+          pdf.setFontSize(11)
+          pdf.text(exp.title || '', margin, yPos)
+          const dateText = `${exp.startDate || ''} - ${exp.endDate || 'Present'}`
+          pdf.setFont('helvetica', 'normal')
+          pdf.text(dateText, pageWidth - margin, yPos, { align: 'right' })
+          yPos += getLineHeight() + emToMm(0.1)
+
+          // Company and Location - CSS: margin-bottom: 0.2em
+          pdf.setFont('helvetica', 'normal')
+          pdf.text(exp.company || '', margin, yPos)
+          if (exp.location) {
+            pdf.text(exp.location, pageWidth - margin, yPos, { align: 'right' })
+          }
+          yPos += getLineHeight() + emToMm(0.2)
+
+          // Description - CSS: margin: 0.15em 0 0 0, padding-left: 1.5em, li margin-bottom: 0.05em
+          if (exp.description) {
+            const descriptionLines = exp.description.split('\n').filter(line => line.trim())
+            descriptionLines.forEach((line, lineIdx) => {
+              const cleanLine = line.trim().replace(/^[-•]\s*/, '')
+              checkPageBreak(getLineHeight())
+              pdf.text(`• ${cleanLine}`, margin + emToMm(1.5), yPos)
+              // CSS: line-height: 1.15 for list items, margin-bottom: 0.05em
+              yPos += getLineHeight() + emToMm(0.05)
+            })
+            // Add 0.15em after description list (CSS: margin: 0.15em 0 0 0)
+            yPos += emToMm(0.15)
+          }
+          
+          // CSS: experience-item margin-bottom: 0.7em between items
+          if (idx < resumeData.experience.length - 1) {
+            addSpacing(emToMm(0.7))
+          }
+        })
+      }
+
+      // Projects Section
+      if (sectionKey === 'projects' && resumeData.projects.length > 0) {
+        if (!isFirstSection || (resumeData.summary && resumeData.summary.trim())) {
+          addSpacing(emToMm(0.7)) // CSS: 0.7em between sections
+        }
+        isFirstSection = false
+        addSectionTitle('PROJECTS')
+        
+        resumeData.projects.forEach((project, idx) => {
+          checkPageBreak(15)
+          
+          // Project Name, Technologies, and Date - CSS: margin-bottom: 0.1em
+          pdf.setFont('helvetica', 'bold')
+          pdf.setFontSize(11)
+          let projectHeader = project.name || ''
+          if (project.technologies && project.technologies.length > 0) {
+            projectHeader += ` | ${project.technologies.join(', ')}`
+          }
+          // Handle long project headers that might wrap
+          const headerLines = pdf.splitTextToSize(projectHeader, maxWidth - 40) // Reserve space for date
+          headerLines.forEach((line, lineIdx) => {
+            checkPageBreak(getLineHeight())
+            pdf.text(line, margin, yPos)
+            if (lineIdx === 0 && project.startDate) {
+              const dateText = `${project.startDate} - ${project.endDate || 'Present'}`
+              pdf.setFont('helvetica', 'normal')
+              pdf.text(dateText, pageWidth - margin, yPos, { align: 'right' })
+            }
+            yPos += getLineHeight()
+          })
+          
+          // If header wrapped, add date on next line
+          if (headerLines.length > 1 && project.startDate) {
+            const dateText = `${project.startDate} - ${project.endDate || 'Present'}`
+            pdf.setFont('helvetica', 'normal')
+            pdf.text(dateText, pageWidth - margin, yPos, { align: 'right' })
+            yPos += getLineHeight() + emToMm(0.1)
+          } else if (headerLines.length === 1) {
+            yPos += emToMm(0.1)
+          }
+
+          // Description - CSS: margin: 0.15em 0 0 0, padding-left: 1.5em, li margin-bottom: 0.05em
+          if (project.description) {
+            pdf.setFont('helvetica', 'normal')
+            const descriptionLines = project.description.split('\n').filter(line => line.trim())
+            descriptionLines.forEach((line, lineIdx) => {
+              const cleanLine = line.trim().replace(/^[-•]\s*/, '')
+              checkPageBreak(getLineHeight())
+              pdf.text(`• ${cleanLine}`, margin + emToMm(1.5), yPos)
+              // CSS: line-height: 1.15 for list items, margin-bottom: 0.05em
+              yPos += getLineHeight() + emToMm(0.05)
+            })
+            // Add 0.15em after description list
+            yPos += emToMm(0.15)
+          }
+          
+          // CSS: project-item margin-bottom: 0.7em between items
+          if (idx < resumeData.projects.length - 1) {
+            addSpacing(emToMm(0.7))
+          }
+        })
+      }
+
+      // Skills Section
+      if (sectionKey === 'skills' && resumeData.skills.length > 0) {
+        if (!isFirstSection || (resumeData.summary && resumeData.summary.trim())) {
+          addSpacing(emToMm(0.7)) // CSS: 0.7em between sections
+        }
+        isFirstSection = false
+        addSectionTitle('TECHNICAL SKILLS')
+        
+        const skillsToDisplay = Array.isArray(resumeData.skills) && resumeData.skills.length > 0 && typeof resumeData.skills[0] === 'string'
+          ? [{ category: 'Languages', items: resumeData.skills }]
+          : resumeData.skills
+
+        skillsToDisplay.forEach((skillCategory, idx) => {
+          checkPageBreak(6)
+          pdf.setFont('helvetica', 'normal')
+          pdf.setFontSize(11)
+          const skillText = `${skillCategory.category}: ${skillCategory.items.join(', ')}`
+          addText(skillText, margin, maxWidth, 11, 'normal', 'left', getLineHeight())
+          // addText already updates yPos, minimal spacing between categories
+          if (idx < skillsToDisplay.length - 1) {
+            addSpacing(emToMm(0.1))
+          }
+        })
+      }
+
+      // Certifications Section
+      if (sectionKey === 'certifications' && resumeData.certifications.length > 0) {
+        if (!isFirstSection || (resumeData.summary && resumeData.summary.trim())) {
+          addSpacing(emToMm(0.7)) // CSS: 0.7em between sections
+        }
+        isFirstSection = false
+        addSectionTitle('CERTIFICATIONS')
+        
+        resumeData.certifications.forEach((cert, idx) => {
+          checkPageBreak(10)
+          
+          // Certification Name and Date
+          pdf.setFont('helvetica', 'bold')
+          pdf.setFontSize(11)
+          pdf.text(cert.name || '', margin, yPos)
+          if (cert.date) {
+            pdf.setFont('helvetica', 'normal')
+            pdf.text(cert.date, pageWidth - margin, yPos, { align: 'right' })
+          }
+          yPos += getLineHeight()
+
+          // Issuer
+          if (cert.issuer) {
+            pdf.setFont('helvetica', 'normal')
+            pdf.text(cert.issuer, margin, yPos)
+            yPos += getLineHeight()
+          }
+          
+          // CSS: certification-item margin-bottom: 0.7em between items
+          if (idx < resumeData.certifications.length - 1) {
+            addSpacing(emToMm(0.7))
+          }
+        })
+      }
+    })
+
+    // Save the PDF
     pdf.save(`${resumeData.personalInfo.fullName || 'resume'}-resume.pdf`)
   }
 
@@ -59,6 +385,15 @@ function ResumePreview({ resumeData, sectionOrder }) {
               ))}
             </div>
           </div>
+
+          {/* Summary Section */}
+          {resumeData.summary && resumeData.summary.trim() && (
+            <div className="resume-section">
+              <div className="summary-content" style={{ whiteSpace: 'pre-line', marginBottom: '0.7em' }}>
+                {resumeData.summary.trim()}
+              </div>
+            </div>
+          )}
 
           {/* Single Column Layout */}
           <div className="resume-body">
