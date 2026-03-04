@@ -44,22 +44,25 @@ function ResumePreview({ resumeData, sectionOrder }) {
 
     // Helper function to add a section title with underline
     // CSS: line-height: 1.15, padding-bottom: 0.15em, margin-bottom: 0.3em
+    // Structure: text → padding-bottom → border → margin-bottom
     const addSectionTitle = (title) => {
       checkPageBreak(10)
       pdf.setFontSize(11)
       pdf.setFont('helvetica', 'bold')
       // Add text at current yPos (baseline)
       pdf.text(title, margin, yPos)
-      // In jsPDF, text is positioned at baseline. For 11pt font:
-      // - Ascender height (capital letters) is ~70% of font size = ~7.7pt = 2.7mm
-      // - We need to move past the text + add padding
-      // Move down by font size + padding to ensure line is well below text
-      yPos += 11 * 0.352778 // Full font size in mm (11pt = 3.88mm)
-      yPos += emToMm(0.15, 11) // padding-bottom
-      pdf.setLineWidth(0.35) // 1pt = 0.35mm
+      // Move down by a larger amount to ensure text is fully cleared
+      // Use 1.5x font size to ensure capital letters are fully cleared
+      // This is more than line-height but ensures no strikethrough
+      yPos += 11 * 1.5 * 0.352778 // 11pt * 1.5 = 5.81mm - ensures text is cleared
+      // Add padding-bottom (0.15em) - space between text and border
+      yPos += emToMm(0.15, 11) // 0.58mm
+      // Draw the border line at this yPos (1pt = 0.35mm width)
+      pdf.setLineWidth(0.35)
       pdf.line(margin, yPos, pageWidth - margin, yPos)
-      // Add margin after line (0.3em)
-      yPos += emToMm(0.3, 11)
+      // Add margin-bottom (0.3em) - space after border before content starts
+      // Add small buffer to prevent strikethrough on first content item
+      yPos += emToMm(0.3, 11) + 1.5 // 1.16mm + 1.5mm buffer for clearance
     }
 
     // Helper function to add spacing
